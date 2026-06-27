@@ -31,7 +31,7 @@ app.post('/ask', async (req, res) => {
   try {
     const messages = buildPrompt(question, relevantChunks);
     const answer = await generateAnswer(messages);
-    const sources = relevantChunks.map((chunk) => chunk.source);
+    const sources = [...new Set(relevantChunks.map((chunk) => chunk.source))];
 
     res.json({ answer, sources });
   } catch (err) {

@@ -4,18 +4,40 @@ const path = require('path');
 
 const KNOWLEDGE_BASE_DIR = path.join(__dirname, 'knowledge-base');
 
+function splitIntoSections(text) {
+  // Split on lines starting with "## " so each markdown section becomes its own chunk,
+  // keeping the heading attached to the section that follows it.
+  const lines = text.split('\n');
+  const sections = [];
+  let current = [];
+
+  for (const line of lines) {
+    if (line.startsWith('## ') && current.length > 0) {
+      sections.push(current.join('\n').trim());
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length > 0) {
+    sections.push(current.join('\n').trim());
+  }
+
+  return sections.filter((section) => section.length > 0);
+}
+
 async function loadKnowledgeBase() {
   const allFiles = await fs.readdir(KNOWLEDGE_BASE_DIR);
   const mdFiles = allFiles.filter((filename) => filename.endsWith('.md'));
 
-  const chunks = await Promise.all(
+  const chunkArrays = await Promise.all(
     mdFiles.map(async (filename) => {
       const text = await fs.readFile(path.join(KNOWLEDGE_BASE_DIR, filename), 'utf-8');
-      return { source: filename, text };
+      const sections = splitIntoSections(text);
+      return sections.map((sectionText) => ({ source: filename, text: sectionText }));
     })
   );
 
-  return chunks;
+  return chunkArrays.flat();
 }
 
 const STOP_WORDS = new Set([
