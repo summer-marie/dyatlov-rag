@@ -18,4 +18,35 @@ async function loadKnowledgeBase() {
   return chunks;
 }
 
-module.exports = { loadKnowledgeBase };
+const STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'in', 'on', 'at', 'of', 'to',
+  'and', 'or', 'what', 'which', 'who', 'how', 'did', 'do', 'does', 'for', 'about',
+]);
+
+function getKeywords(question) {
+  return question
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+}
+
+function searchChunks(question, chunks, topN = 3) {
+  const keywords = getKeywords(question);
+
+  const scored = chunks
+    .map((chunk) => {
+      const lowerText = chunk.text.toLowerCase();
+      const score = keywords.reduce((total, keyword) => {
+        const occurrences = lowerText.split(keyword).length - 1;
+        return total + occurrences;
+      }, 0);
+      return { ...chunk, score };
+    })
+    .filter((chunk) => chunk.score > 0);
+
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, topN);
+}
+
+module.exports = { loadKnowledgeBase, searchChunks };
