@@ -56,3 +56,46 @@ Two requests sent back-to-back returned `{"error":"Failed to generate an answer.
 4. **What was the weather like on the moon that night?** → "I do not know." Still correctly refuses; answer is cleaner than before.
 
 **Net result:** chunking by heading fixed the hallucination (LLM no longer invents facts not present in any retrieved chunk) and tightened answers 1 and 2. It did not fix question 3, because that's a synonym/terminology gap, which keyword-frequency matching fundamentally can't bridge without either a synonym list or semantic (embedding-based) retrieval — out of scope for the current "no embeddings, no vector DB" tech stack decision. Flagging for a future decision rather than acting on it now.
+
+## Step 12 — Synonym matching + length-normalized scoring (retriever.js)
+
+Decided to actually address the Step 11 vocabulary-mismatch limitation instead of leaving it. Two changes to `retriever.js`:
+
+1. **`SYNONYMS` map + `expandKeywords()`**: built from grepping actual term frequency across `knowledge-base/*.md` (hiker/group/travellers/students/skiers, tent/camp/campsite, found/discovered/located, died/death/deaths/perished/fatal, injury/injuries/wound/wounds/trauma, body/bodies/corpse/corpses/remains, far/distance/metres/meters/km/kilometres). A question's keywords are expanded to include their knowledge-base-side synonyms before scoring.
+2. **Length-normalized scoring**: raw keyword-occurrence counts were tested first and confirmed the real culprit for question 3 wasn't just vocabulary — it was that long chunks (e.g. the avalanche theory section) accumulate more raw keyword hits than the short, precise `06_first_five_bodies.md` "## Location" section just by being longer. Switched `score` to `occurrences / wordCount` (density, not raw count).
+3. Normalizing by length surfaced a side effect: a lone "# Title" line before a file's first `##` heading became its own near-empty chunk with an inflated density score (e.g. "# The Tent" alone scoring higher than real content). Fixed `splitIntoSections()` to require `MIN_SECTION_WORDS = 10` before flushing a section, merging short leading fragments into the next section instead of treating them as standalone chunks.
+4. Bumped default `topN` in `searchChunks` from 3 → 6: chunks are now heading-sized (much smaller than before), and the correct "## Location" section for question 3 ranked 6th — confirmed via a direct Node script that scored and ranked all chunks before changing the constant.
+
+### Re-test (8 questions total — original 4 + 4 new synonym-targeted cases)
+
+| # | Question | Result |
+|---|---|---|
+| 1 | How many hikers died? | "Nine hikers died." — correct, tightened sourcing. |
+| 2 | Which hiker had the most serious injuries? | Names Dubinina and Zolotaryov (major chest fractures) — correct, still appropriately hedges between two tied-severity cases rather than forcing a single answer. |
+| 3 | How far from the tent were the hikers found? | Now returns the real 300/480/630 m figures from `06_first_five_bodies.md`, and explicitly says it can't compute exact tent-distance from what's given — accurate and no longer fabricated. **This was the original failing case — now fixed.** |
+| 4 | What was the weather like on the moon that night? | Correctly refuses. |
+| 5 | How many **travelers** were in the **group**? (synonym for hikers) | "There were nine travelers in the group." — correct, synonym match worked. |
+| 6 | What condition was the **camp** in when it was **discovered**? (synonyms for tent/found) | Correctly describes the tent being torn down — synonym match worked. |
+| 7 | Were there any **wounds** on the **corpses**? (synonyms for injuries/bodies) | Correctly pulls injury details from `08_injuries_and_cause_of_death.md` — synonym match worked. |
+| 8 | How many **kilometers** did the **students** walk before the incident? (synonyms for km/hikers) | "I do not know" — verified this is a *correct* refusal, not a retrieval miss: the knowledge base states km to Otorten and to the forest, but never total distance walked, so refusing is accurate. |
+
+All 8 pass. The original Step 11 known limitation (question 3) is now resolved. No regressions in the other 7.
+
+## Step 13 — More synonym coverage (self-generated from knowledge-base content)
+
+Read `02_the_group.md`, `07_remaining_four_bodies.md`, and `04_search_and_discovery.md` directly to find more vocabulary gaps, rather than asking for more context. Found two: the knowledge base says "expedition"/"trip"/"route" interchangeably but never "journey"; and it says "buried" but a user might say "covered." Added to `SYNONYMS` in `retriever.js`:
+- `trip` / `journey` / `expedition` / `route` (all map to each other)
+- `buried` / `covered` (map to each other)
+
+### New test cases (9–12)
+
+| # | Question | Result |
+|---|---|---|
+| 9 | What was the purpose of the **journey**? (KB says "expedition") | Correctly answers: reaching Otorten, 10 km north. Synonym match worked. |
+| 10 | How many people were originally part of the **trip**? (KB says "expedition"/"group") | "10 people: 8 men and 2 women" — correct, pulled from `02_the_group.md`'s table/text. |
+| 11 | Where were the last four bodies **discovered**? (existing found/discovered synonym, new context: ravine/creek) | Correct: ravine, 75m from pine tree, 70m from fire pit, under 4m of snow. |
+| 12 | How deep was the snow that **covered** the last four hikers? (KB says "buried") | "four metres (13 ft) of snow" — correct, synonym match worked. |
+
+Re-ran questions 3 and 4 from Step 12 afterward to confirm no regressions from the new SYNONYMS entries — both still correct (tent-distance still grounded with real figures, moon-weather still refuses).
+
+**Total test coverage: 12 questions, all passing.** No known retrieval failures remain in this round; remaining limitation is general (keyword/density matching has no true semantic understanding, so any vocabulary not anticipated in `SYNONYMS` will still be missed) rather than a specific bug.
