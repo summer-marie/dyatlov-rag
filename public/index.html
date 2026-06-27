@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dyatlov Pass Dossier</title>
+  <style>
+    :root {
+      --bg: #0e0f12;
+      --panel: #171a20;
+      --panel-2: #1f232b;
+      --accent: #c0392b;
+      --accent-2: #e0e0e0;
+      --text: #d6d9de;
+      --muted: #8a9099;
+      --border: #2a2f38;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Courier New", Courier, monospace;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(192, 57, 43, 0.08), transparent 40%),
+        radial-gradient(circle at 80% 90%, rgba(120, 120, 120, 0.06), transparent 45%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+    }
+
+    .dossier {
+      width: 100%;
+      max-width: 720px;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 90px;
+      resize: vertical;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: var(--accent);
+    }
+
+    button {
+      margin-top: 16px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 12px 20px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    button:hover:not(:disabled) {
+      background: #a93226;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .section-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent-2);
+      margin-bottom: 10px;
+    }
+
+    #answer {
+      white-space: pre-wrap;
+      line-height: 1.6;
+      min-height: 20px;
+    }
+
+    #sources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .source-tag {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 10px;
+      border-radius: 3px;
+      font-size: 0.8rem;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .error {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="dossier">
+    <h1>Dyatlov Pass Dossier</h1>
+    <p class="subtitle">Classified Case Files &mdash; RAG Inquiry Terminal</p>
+
+    <div class="panel">
+      <label for="question">Submit Your Inquiry</label>
+      <textarea id="question" placeholder="e.g. What evidence supports the avalanche theory?"></textarea>
+      <button id="askBtn">Investigate</button>
+    </div>
+
+    <div class="panel">
+      <div class="section-title">Findings</div>
+      <div id="answer" class="empty">Awaiting inquiry...</div>
+    </div>
+
+    <div class="panel">
+      <div class="section-title">Source Files</div>
+      <div id="sources" class="empty">No sources retrieved yet.</div>
+    </div>
+  </div>
+
+  <script>
+    const askBtn = document.getElementById('askBtn');
+    const questionInput = document.getElementById('question');
+    const answerDiv = document.getElementById('answer');
+    const sourcesDiv = document.getElementById('sources');
+
+    async function askQuestion() {
+      const question = questionInput.value.trim();
+      if (!question) {
+        answerDiv.textContent = 'Please enter a question first.';
+        answerDiv.className = 'error';
+        return;
+      }
+
+      askBtn.disabled = true;
+      answerDiv.textContent = 'Searching the case files...';
+      answerDiv.className = 'empty';
+      sourcesDiv.textContent = '';
+      sourcesDiv.className = 'empty';
+
+      try {
+        const response = await fetch('http://localhost:3000/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          answerDiv.textContent = data.error || 'An error occurred.';
+          answerDiv.className = 'error';
+          return;
+        }
+
+        answerDiv.textContent = data.answer;
+        answerDiv.className = '';
+
+        if (data.sources && data.sources.length > 0) {
+          sourcesDiv.className = '';
+          sourcesDiv.innerHTML = data.sources
+            .map((src) => `<span class="source-tag">${src}</span>`)
+            .join('');
+        } else {
+          sourcesDiv.textContent = 'No sources retrieved.';
+          sourcesDiv.className = 'empty';
+        }
+      } catch (err) {
+        answerDiv.textContent = 'Failed to reach the server. Is it running?';
+        answerDiv.className = 'error';
+      } finally {
+        askBtn.disabled = false;
+      }
+    }
+
+    askBtn.addEventListener('click', askQuestion);
+    questionInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        askQuestion();
+      }
+    });
+  </script>
+</body>
+</html>
