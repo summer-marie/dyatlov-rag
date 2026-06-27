@@ -26,6 +26,10 @@ Context doc for resuming work across sessions. Follows `AGENTS.md` rules: one sm
 
 - [x] **Step 13 — More Synonym Coverage**: read `02_the_group.md`, `07_remaining_four_bodies.md`, `04_search_and_discovery.md` directly to self-generate 4 more test questions (no extra context needed from the user). Found two more vocabulary gaps and added them to `retriever.js`'s `SYNONYMS` map: `trip`/`journey`/`expedition`/`route`, and `buried`/`covered`. All 4 new questions pass, and a regression check on the Step 12 tent-distance and moon-weather questions confirmed no breakage. Total manual test coverage now 12 questions, all passing, logged in `tests/manual-questions.md`.
 
+- [x] **Step 14 — More Synonym Coverage, Round 2**: read `01_overview.md`, `09_investigation.md`, `18_recent_developments.md`, `19_legacy.md`, `16_theory_animal_attack.md`, `17_other_theories.md` directly to self-generate 4 more test questions. Found and added 4 more gaps to `SYNONYMS`: `withdrew`/`quit`/`left`, `probe`/`investigation`/`inquest`, `monument`/`memorial`/`plaque`, `blizzard`/`storm`/`snowstorm`. All 4 new questions pass; regression-checked the tent-distance question again with no breakage. Total manual test coverage now 16/16 passing, logged in `tests/manual-questions.md`.
+
+- [x] **Step 15 — Stop-Word Tuning**: addressed the flagged "moon"/"night" sources issue from Step 10. Added `that` to `STOP_WORDS` in `retriever.js` (filler in all 19 knowledge-base files). Tried adding `night` too, but reverted after it broke question 16 ("blizzard...night of the tragedy"), which depends on matching the literal phrase "the weather on the night of the tragedy was harsh" in `09_investigation.md` — `night` is filler in most files but load-bearing in that one. Full regression run (questions 1, 2, 3, 4, 9, 16) confirmed the final state (only `that` added) has no breakage. Logged in `tests/manual-questions.md` Step 15.
+
 ## Notes
 - Tech stack: Node.js + Express, CommonJS modules (`"type": "commonjs"` in `package.json`), vanilla JS, no TypeScript.
 - Retrieval is basic keyword/frequency matching — no vector DB, no embeddings.

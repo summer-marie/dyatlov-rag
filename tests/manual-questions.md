@@ -99,3 +99,39 @@ Read `02_the_group.md`, `07_remaining_four_bodies.md`, and `04_search_and_discov
 Re-ran questions 3 and 4 from Step 12 afterward to confirm no regressions from the new SYNONYMS entries — both still correct (tent-distance still grounded with real figures, moon-weather still refuses).
 
 **Total test coverage: 12 questions, all passing.** No known retrieval failures remain in this round; remaining limitation is general (keyword/density matching has no true semantic understanding, so any vocabulary not anticipated in `SYNONYMS` will still be missed) rather than a specific bug.
+
+## Step 14 — More synonym coverage, round 2 (self-generated)
+
+Read `01_overview.md`, `09_investigation.md`, `18_recent_developments.md`, `19_legacy.md`, `16_theory_animal_attack.md`, `17_other_theories.md` directly to find more gaps. Found 4 more and added to `SYNONYMS` in `retriever.js`:
+- `withdrew` / `quit` / `left` (KB says "left expedition because of illness")
+- `probe` / `investigation` / `inquest` (KB uses "investigation"/"inquest" interchangeably, never "probe")
+- `monument` / `memorial` / `plaque` (KB says "memorial"/"plaque")
+- `blizzard` / `storm` / `snowstorm` (KB says "storm"/"snowstorm")
+
+### New test cases (13–16)
+
+| # | Question | Result |
+|---|---|---|
+| 13 | Who **withdrew** from the expedition before it began? | "One member... withdrew... because of health issues" — correct (Yudin), synonym match worked. |
+| 14 | When was the **probe** into the deaths reopened? | "February 2019" — correct, synonym match worked. |
+| 15 | Is there a **monument** dedicated to the group? | Correctly describes the rock outcrop memorial — synonym match worked. |
+| 16 | What was the **blizzard** like the night of the tragedy? | Correctly pulls the ICRF wind speed/temperature/snowstorm details — synonym match worked. |
+
+Re-ran the tent-distance question afterward — still correctly grounded (no fabrication, same sources), confirming no regression.
+
+**Total test coverage: 16 questions, all passing.**
+
+## Step 15 — Stop-word tuning (retriever.js)
+
+Investigated the long-flagged issue: questions like "What was the weather like on the moon **that night**?" dragged in mostly-irrelevant chunks because "night" and "that" pass the 3-char length filter and aren't in `STOP_WORDS`, despite acting as generic filler in most of the corpus.
+
+Debugged with a direct keyword-extraction script and confirmed via `grep -c` on `knowledge-base/*.md`:
+- `that` appears in all 19 files as filler ("...that they had died") — added to `STOP_WORDS`.
+- `night` appears in 8/19 files, mostly as filler — but tried adding it and it caused a **real regression**: question 16 ("What was the blizzard like the night of the tragedy?") relies on it matching the literal phrase "the weather on the **night** of the tragedy was harsh" in `09_investigation.md`. Removing it as a keyword broke that match. **Reverted** — `night` stays a real keyword despite being mostly filler, because the one case where it's load-bearing matters more than the noise it adds elsewhere.
+
+### Verification
+- Re-ran question 4 (moon/weather) — still correctly refuses, sources slightly more weather-thematic than before (`that` removal helped a little on its own).
+- Re-ran question 16 (blizzard/night) — confirmed it's back to its correct, detailed answer after reverting `night`.
+- Re-ran questions 1, 2, 3, 9 as a broader regression check — no breakage.
+
+**Takeaway:** not every generic-seeming word can be safely treated as a stop word in a small, single-topic corpus — a word can be filler in 90% of files and the one specific phrase match needed in the other 10%. `STOP_WORDS` changes need a regression check against the full test set, not just the question that motivated the change.

@@ -51,6 +51,13 @@ async function loadKnowledgeBase() {
 const STOP_WORDS = new Set([
   'a', 'an', 'the', 'is', 'are', 'was', 'were', 'in', 'on', 'at', 'of', 'to',
   'and', 'or', 'what', 'which', 'who', 'how', 'did', 'do', 'does', 'for', 'about',
+  // "that" appears in all 19 knowledge-base files as generic filler (e.g. "...that
+  // they had died") rather than as informative content, so it behaves like a stop word
+  // here even though it isn't one in general English. Note: "night" was tried as a
+  // stop word too but reverted — it's filler in most files, but a real phrase match in
+  // 09_investigation.md ("the weather on the night of the tragedy was harsh"), so
+  // removing it broke a legitimate question. Left as a real keyword.
+  'that',
 ]);
 
 // Maps a question-side term to the words the knowledge base actually uses for that
@@ -84,6 +91,16 @@ const SYNONYMS = {
   expedition: ['trip', 'journey', 'route'],
   buried: ['covered'],
   covered: ['buried'],
+  withdrew: ['left', 'quit'],
+  quit: ['left', 'withdrew'],
+  probe: ['investigation', 'inquest'],
+  investigation: ['probe', 'inquest'],
+  inquest: ['probe', 'investigation'],
+  monument: ['memorial', 'plaque'],
+  memorial: ['monument', 'plaque'],
+  plaque: ['monument', 'memorial'],
+  blizzard: ['storm', 'snowstorm'],
+  storm: ['blizzard', 'snowstorm'],
 };
 
 function getKeywords(question) {
