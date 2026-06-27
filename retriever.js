@@ -5,7 +5,7 @@ const path = require('path');
 const KNOWLEDGE_BASE_DIR = path.join(__dirname, 'knowledge-base');
 const EMBEDDINGS_FILE = path.join(__dirname, 'embeddings.json');
 const EMBEDDING_MODEL = 'text-embedding-3-small';
-const MIN_SIMILARITY = 0.25;
+const MIN_SIMILARITY = 0.2;
 
 const MIN_SECTION_WORDS = 10;
 
@@ -95,11 +95,52 @@ async function embedQuery(question) {
   return data.data[0].embedding;
 }
 
-async function searchChunks(question, embeddings, topN = 6) {
+const QUERY_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'in', 'on', 'at', 'of', 'to',
+  'and', 'or', 'what', 'which', 'who', 'how', 'did', 'do', 'does', 'for',
+  'about', 'that', 'this', 'many', 'much', 'be', 'been', 'being', 'as', 'by',
+  'with', 'from', 'into', 'than', 'then', 'there', 'their', 'they', 'them',
+]);
+
+function getQueryKeywords(question) {
+  return question
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((word) => word.length > 2 && !QUERY_STOP_WORDS.has(word));
+}
+
+// Rewards a chunk for containing rare query terms verbatim (names, numbers, "women"/
+// "men", short factual phrases) so a strong lexical match can rescue a chunk that
+// scores low on pure semantic similarity. A keyword's contribution is inversely
+// proportional to how many chunks contain it, so common words add almost nothing.
+const KEYWORD_BOOST_SCALE = 0.3;
+
+function keywordBoost(chunkText, keywords, docFrequency) {
+  const lowerText = chunkText.toLowerCase();
+  return keywords.reduce((boost, keyword) => {
+    if (lowerText.includes(keyword)) {
+      return boost + KEYWORD_BOOST_SCALE / docFrequency[keyword];
+    }
+    return boost;
+  }, 0);
+}
+
+async function searchChunks(question, embeddings, topN = 8) {
   const queryVector = await embedQuery(question);
+  const keywords = getQueryKeywords(question);
+
+  const docFrequency = {};
+  for (const keyword of keywords) {
+    const count = embeddings.filter((chunk) => chunk.text.toLowerCase().includes(keyword)).length;
+    docFrequency[keyword] = count || 1;
+  }
 
   const scored = embeddings
-    .map((chunk) => ({ ...chunk, score: cosineSimilarity(queryVector, chunk.vector) }))
+    .map((chunk) => {
+      const similarity = cosineSimilarity(queryVector, chunk.vector);
+      const boost = keywordBoost(chunk.text, keywords, docFrequency);
+      return { ...chunk, score: similarity + boost };
+    })
     .filter((chunk) => chunk.score >= MIN_SIMILARITY);
 
   scored.sort((a, b) => b.score - a.score);
