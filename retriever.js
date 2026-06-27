@@ -3,6 +3,9 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const KNOWLEDGE_BASE_DIR = path.join(__dirname, 'knowledge-base');
+const EMBEDDINGS_FILE = path.join(__dirname, 'embeddings.json');
+const EMBEDDING_MODEL = 'text-embedding-3-small';
+const MIN_SIMILARITY = 0.25;
 
 const MIN_SECTION_WORDS = 10;
 
@@ -48,117 +51,60 @@ async function loadKnowledgeBase() {
   return chunkArrays.flat();
 }
 
-const STOP_WORDS = new Set([
-  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'in', 'on', 'at', 'of', 'to',
-  'and', 'or', 'what', 'which', 'who', 'how', 'did', 'do', 'does', 'for', 'about',
-  // "that" appears in all 19 knowledge-base files as generic filler (e.g. "...that
-  // they had died") rather than as informative content, so it behaves like a stop word
-  // here even though it isn't one in general English. Note: "night" was tried as a
-  // stop word too but reverted — it's filler in most files, but a real phrase match in
-  // 09_investigation.md ("the weather on the night of the tragedy was harsh"), so
-  // removing it broke a legitimate question. Left as a real keyword.
-  'that',
-]);
-
-// Maps a question-side term to the words the knowledge base actually uses for that
-// concept, so e.g. "hikers"/"tent"/"found" still match chunks that say
-// "group"/"camp"/"discovered". Built from grepping actual term frequency in
-// knowledge-base/*.md (see tests/manual-questions.md Step 12 notes).
-const SYNONYMS = {
-  hiker: ['hikers', 'group', 'travellers', 'traveler', 'travelers', 'students', 'student', 'skiers', 'skier'],
-  hikers: ['hiker', 'group', 'travellers', 'traveler', 'travelers', 'students', 'student', 'skiers', 'skier'],
-  group: ['hikers', 'travellers', 'students', 'skiers'],
-  tent: ['camp', 'campsite'],
-  camp: ['tent', 'campsite'],
-  found: ['discovered', 'located'],
-  discovered: ['found', 'located'],
-  died: ['death', 'deaths', 'perished', 'fatal'],
-  death: ['died', 'deaths', 'perished', 'fatal'],
-  deaths: ['died', 'death', 'perished', 'fatal'],
-  fatal: ['died', 'death', 'deaths', 'perished'],
-  injury: ['injuries', 'wound', 'wounds', 'trauma'],
-  injuries: ['injury', 'wound', 'wounds', 'trauma'],
-  wound: ['wounds', 'injury', 'injuries', 'trauma'],
-  wounds: ['wound', 'injury', 'injuries', 'trauma'],
-  trauma: ['injury', 'injuries', 'wound', 'wounds'],
-  body: ['bodies', 'corpse', 'corpses', 'remains'],
-  bodies: ['body', 'corpse', 'corpses', 'remains'],
-  corpse: ['corpses', 'body', 'bodies', 'remains'],
-  far: ['distance', 'metres', 'meters', 'km', 'kilometres', 'kilometers'],
-  distance: ['far', 'metres', 'meters', 'km', 'kilometres', 'kilometers'],
-  trip: ['expedition', 'journey', 'route'],
-  journey: ['expedition', 'trip', 'route'],
-  expedition: ['trip', 'journey', 'route'],
-  buried: ['covered'],
-  covered: ['buried'],
-  withdrew: ['left', 'quit'],
-  quit: ['left', 'withdrew'],
-  probe: ['investigation', 'inquest'],
-  investigation: ['probe', 'inquest'],
-  inquest: ['probe', 'investigation'],
-  monument: ['memorial', 'plaque'],
-  memorial: ['monument', 'plaque'],
-  plaque: ['monument', 'memorial'],
-  blizzard: ['storm', 'snowstorm'],
-  storm: ['blizzard', 'snowstorm'],
-};
-
-function getKeywords(question) {
-  return question
-    .toLowerCase()
-    .split(/\W+/)
-    .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+async function loadEmbeddings() {
+  let raw;
+  try {
+    raw = await fs.readFile(EMBEDDINGS_FILE, 'utf-8');
+  } catch (err) {
+    throw new Error(`Missing ${EMBEDDINGS_FILE}. Run "node embedder.js" first to generate it.`);
+  }
+  return JSON.parse(raw);
 }
 
-// Expands the raw keywords with their known synonyms, deduped, so scoring counts
-// occurrences of either the question's exact wording or the knowledge base's wording.
-function expandKeywords(keywords) {
-  const expanded = new Set(keywords);
-  for (const keyword of keywords) {
-    const synonyms = SYNONYMS[keyword];
-    if (synonyms) {
-      for (const synonym of synonyms) {
-        expanded.add(synonym);
-      }
-    }
-  }
-  return [...expanded];
+function cosineSimilarity(a, b) {
+  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+  const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+  const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+  return dot / (magA * magB);
 }
 
-function searchChunks(question, chunks, topN = 6) {
-  const keywords = expandKeywords(getKeywords(question));
-
-  // Inverse document frequency: a keyword that appears in almost every chunk (e.g.
-  // "group", "hikers") is mostly noise and shouldn't carry as much weight as a rare,
-  // distinguishing keyword (e.g. "women", appearing in only one chunk). Without this,
-  // synonym expansion of common words drowned out the one keyword that actually mattered
-  // (see tests/manual-questions.md Step 16: "how many of the hikers were women").
-  const totalChunks = chunks.length;
-  const docFrequency = {};
-  for (const keyword of keywords) {
-    const count = chunks.filter((chunk) => chunk.text.toLowerCase().includes(keyword)).length;
-    docFrequency[keyword] = count || 1;
+async function embedQuery(question) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing OPENAI_API_KEY in .env');
   }
 
-  const scored = chunks
-    .map((chunk) => {
-      const lowerText = chunk.text.toLowerCase();
-      const occurrences = keywords.reduce((total, keyword) => {
-        const count = lowerText.split(keyword).length - 1;
-        const inverseDocFrequency = totalChunks / docFrequency[keyword];
-        return total + count * inverseDocFrequency;
-      }, 0);
-      // Normalize by chunk length so a short, precise section isn't out-scored by a
-      // long section that merely repeats keywords more often without being more relevant.
-      const wordCount = lowerText.split(/\s+/).filter(Boolean).length;
-      const score = wordCount > 0 ? occurrences / wordCount : 0;
-      return { ...chunk, score };
-    })
-    .filter((chunk) => chunk.score > 0);
+  const response = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: EMBEDDING_MODEL,
+      input: question,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI embedding error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+async function searchChunks(question, embeddings, topN = 6) {
+  const queryVector = await embedQuery(question);
+
+  const scored = embeddings
+    .map((chunk) => ({ ...chunk, score: cosineSimilarity(queryVector, chunk.vector) }))
+    .filter((chunk) => chunk.score >= MIN_SIMILARITY);
 
   scored.sort((a, b) => b.score - a.score);
 
   return scored.slice(0, topN);
 }
 
-module.exports = { loadKnowledgeBase, searchChunks };
+module.exports = { loadKnowledgeBase, loadEmbeddings, searchChunks };

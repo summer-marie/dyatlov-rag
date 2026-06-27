@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { loadKnowledgeBase, searchChunks } = require('./retriever');
+const { loadEmbeddings, searchChunks } = require('./retriever');
 const { buildPrompt } = require('./promptBuilder');
 const { generateAnswer } = require('./generator');
 
@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-let knowledgeBase = [];
+let embeddings = [];
 
 app.post('/ask', async (req, res) => {
   const { question } = req.body;
@@ -19,7 +19,7 @@ app.post('/ask', async (req, res) => {
     return res.status(400).json({ error: 'Question is required.' });
   }
 
-  const relevantChunks = searchChunks(question, knowledgeBase);
+  const relevantChunks = await searchChunks(question, embeddings);
 
   if (relevantChunks.length === 0) {
     return res.json({
@@ -41,7 +41,7 @@ app.post('/ask', async (req, res) => {
 });
 
 async function startServer() {
-  knowledgeBase = await loadKnowledgeBase();
+  embeddings = await loadEmbeddings();
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
