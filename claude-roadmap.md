@@ -14,9 +14,9 @@ Context doc for resuming work across sessions. Follows `AGENTS.md` rules: one sm
 - [x] **Step 4 — Prompt Augmentation**: `promptBuilder.js` — `buildPrompt(question, chunks)` merges retrieved chunks into a context block and returns a `messages` array (system + user) with strict "answer ONLY from context" instructions, ready for the Groq chat completions API.
 - [x] **Step 5 — Generation**: `generator.js` — `generateAnswer(messages)` sends the messages array to Groq's chat completions endpoint via native `fetch` (model: `llama-3.1-8b-instant`), throws on API errors, returns the answer text. Fully separate from retrieval/prompt logic.
 - [x] **Step 6 — Routing**: `server.js` — Express app loads the knowledge base once at startup, serves `public/` statically, and exposes `POST /ask`: retrieves chunks → bypasses the LLM with a hardcoded "I don't know" on 0 results (Step 3) → builds prompt → calls Groq → returns `{ answer, sources }` (sources taken from retrieved chunks, not the LLM).
-- [ ] **Step 7 — Env/Config**: confirm `.env` holds `GROQ_API_KEY` (and any other config), loaded via `dotenv`.
-- [ ] **Step 8 — Manual End-to-End Test**: run server, use `public/index.html` in browser, verify a real question returns an answer + correct sources, and an unanswerable question returns the hardcoded "I don't know".
-- [ ] **Step 9 — Edge Cases**: empty question input, no matching chunks, Groq API errors/timeouts.
+- [x] **Step 7 — Env/Config**: `.env` holds `GROQ_API_KEY` and `GROQ_MODEL`, loaded via `dotenv` in `generator.js`.
+- [x] **Step 8 — Manual End-to-End Test**: server started via `node server.js`, tested `POST /ask` directly with curl — relevant question returned a grounded answer with correct `sources` array; unrelated question returned the hardcoded "I don't know" with `sources: []`. Browser test against `public/index.html` still recommended.
+- [x] **Step 9 — Edge Cases**: empty question input verified (returns `400 { error: "Question is required." }`); no-matching-chunks verified (bypasses LLM, hardcoded message). Groq API error/timeout path is implemented (`try/catch` → `500`) but not live-tested (would require simulating an API failure).
 
 ## Notes
 - Tech stack: Node.js + Express, CommonJS modules (`"type": "commonjs"` in `package.json`), vanilla JS, no TypeScript.
