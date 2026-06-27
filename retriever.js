@@ -128,11 +128,25 @@ function expandKeywords(keywords) {
 function searchChunks(question, chunks, topN = 6) {
   const keywords = expandKeywords(getKeywords(question));
 
+  // Inverse document frequency: a keyword that appears in almost every chunk (e.g.
+  // "group", "hikers") is mostly noise and shouldn't carry as much weight as a rare,
+  // distinguishing keyword (e.g. "women", appearing in only one chunk). Without this,
+  // synonym expansion of common words drowned out the one keyword that actually mattered
+  // (see tests/manual-questions.md Step 16: "how many of the hikers were women").
+  const totalChunks = chunks.length;
+  const docFrequency = {};
+  for (const keyword of keywords) {
+    const count = chunks.filter((chunk) => chunk.text.toLowerCase().includes(keyword)).length;
+    docFrequency[keyword] = count || 1;
+  }
+
   const scored = chunks
     .map((chunk) => {
       const lowerText = chunk.text.toLowerCase();
       const occurrences = keywords.reduce((total, keyword) => {
-        return total + (lowerText.split(keyword).length - 1);
+        const count = lowerText.split(keyword).length - 1;
+        const inverseDocFrequency = totalChunks / docFrequency[keyword];
+        return total + count * inverseDocFrequency;
       }, 0);
       // Normalize by chunk length so a short, precise section isn't out-scored by a
       // long section that merely repeats keywords more often without being more relevant.

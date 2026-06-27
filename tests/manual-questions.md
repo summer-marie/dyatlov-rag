@@ -135,3 +135,38 @@ Debugged with a direct keyword-extraction script and confirmed via `grep -c` on 
 - Re-ran questions 1, 2, 3, 9 as a broader regression check — no breakage.
 
 **Takeaway:** not every generic-seeming word can be safely treated as a stop word in a small, single-topic corpus — a word can be filler in 90% of files and the one specific phrase match needed in the other 10%. `STOP_WORDS` changes need a regression check against the full test set, not just the question that motivated the change.
+
+## Step 16 — Browser test + IDF weighting fix (real bug found via manual UI use)
+
+The user opened `public/index.html` in an actual browser (Chrome MCP extension wasn't connected, so this was done manually rather than automated) and asked: **"How many of the hikers were women?"** — got `"I do not know the number of women in the Dyatlov hikers group."` This was a real failure: `02_the_group.md`'s "## Purpose of the Expedition" section literally says "the initial group consisted of eight men and two women," but it wasn't retrieved.
+
+### Root cause
+
+Debugged with a direct Node scoring script. Two compounding issues:
+
+1. The "Purpose of the Expedition" section never uses the word "hikers" (or any of its synonyms) — it says "group"/"people"/"members" instead. First instinct was to remove `group` from the `hiker`/`hikers` synonym list, but that's a band-aid: it just means *no* keyword in the question matches that chunk except "women" (1 occurrence in 191 words), which still scores far too low against other chunks that happen to repeat "hikers"/"group" many times.
+2. **Real cause**: keyword scoring had no concept of how *distinguishing* a keyword is. "group" appears in 17/19 files (confirmed via grep) — almost as generic as a stop word in this corpus — yet it was weighted the same as "women," which appears in exactly 1 file. Common synonym-expanded keywords were drowning out the one rare keyword that actually mattered.
+
+### Fix: IDF (inverse document frequency) weighting
+
+Restored `group` to the `hiker`/`hikers` synonym list, and changed `searchChunks` in `retriever.js` to weight each keyword's occurrence count by `totalChunks / documentFrequency(keyword)` before the existing length normalization — standard TF-IDF. A keyword present in almost every chunk now contributes very little to the score; a keyword present in only one or two chunks contributes much more. This is a more principled fix than hand-picking which synonyms to exclude, and means future broad synonyms (like `group`) don't need to be avoided — rarity-weighting handles it automatically.
+
+### Verification
+
+- "How many of the hikers were women?" → "According to the context, two of the hikers were women." — **fixed**, correct chunk now ranks in the top 6.
+- Full regression across all 16 prior questions (1–16): all still correct. Notable improvements as a side effect of IDF weighting: question 1 now gives the precise 6/3 breakdown instead of just "nine," and question 2 now gives a direct answer (Thibeaux-Brignolles) instead of hedging.
+- Two requests hit Groq rate-limit errors during the regression run (questions 10 and 16) — confirmed transient by retrying with a longer delay; not a regression.
+
+**Total test coverage: 17 questions, all passing.** This was the first bug found through actual manual browser use rather than a designed test case — a reminder that synonym/scoring tuning needs real usage, not just the test list, to catch what wasn't anticipated.
+
+## Step 17 — Groq API error path (simulated failure)
+
+Closed the last outstanding item from Step 9 ("Groq API error/timeout path is implemented but not live-tested"). Ran the server with `GROQ_API_KEY=invalid_key_for_testing node server.js` (env var passed at launch, `.env` file untouched) to force a real Groq 401 response, then sent a normal question to `/ask`.
+
+**Result:**
+- Client response: `HTTP/1.1 500` with body `{"error":"Failed to generate an answer. Please try again."}` — exactly the generic, safe message `server.js`'s `catch` block is supposed to return. No API key or internal details leaked to the client.
+- Server log: `console.error(err)` printed the full underlying error (`Groq API error (401): {"error":{"message":"Invalid API Key",...}}`) — confirms the real cause is visible server-side for debugging, even though the client never sees it.
+- Server process stayed alive and responsive after the error (no crash, no hung request).
+- Restarted with the correct key and re-sent the same question — got a normal, correct answer immediately, confirming the server recovers cleanly with no lingering bad state.
+
+This confirms the `try/catch` → `500` path in `server.js` works exactly as designed.
